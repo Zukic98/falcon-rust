@@ -13,7 +13,7 @@ use crate::inverse::Inverse;
 pub(crate) const Q: u32 = 12 * 1024 + 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Felt(u32);
+pub struct Felt(u32);
 
 impl Felt {
     pub const fn new(value: i16) -> Self {
@@ -37,6 +37,11 @@ impl Felt {
 
     pub const fn multiply(&self, other: Self) -> Self {
         Felt((self.0 * other.0) % Q)
+    }
+
+    /// Vraća vrijednost kao običan i16 broj.
+    pub fn to_i16(&self) -> i16 {
+        self.value() // Dodali smo zagrade () jer je to funkcija!
     }
 }
 

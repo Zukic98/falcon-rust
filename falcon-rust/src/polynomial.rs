@@ -621,7 +621,7 @@ where
 
 /// Hash a string to a random polynomial in ZZ[ X ] mod <Phi(X), q>.
 /// Algorithm 3, "HashToPoint" in the spec (page 31).
-pub(crate) fn hash_to_point(string: &[u8], n: usize) -> Polynomial<Felt> {
+pub fn hash_to_point(string: &[u8], n: usize) -> Polynomial<Felt> {
     const K: u32 = (1u32 << 16) / Q;
 
     let mut hasher = Shake256::default();
@@ -740,5 +740,51 @@ mod test {
         let karatsuba = lhs.karatsuba(&rhs);
         let difference = schoolbook - karatsuba;
         assert!(difference.l2_norm() < f64::EPSILON * 100.0);
+    }
+}
+
+impl<F> Polynomial<F>
+where
+    F: Clone + Add<Output = F>, // F mora podržavati zbrajanje
+{
+    /// Zbraja dva polinoma (vektorsko zbrajanje).
+    pub fn add_poly(&self, other: &Polynomial<F>) -> Polynomial<F> {
+        // Koristimo .coefficients (ne coeffs!)
+        let len = self.coefficients.len();
+        // Ako su duljine različite, uzimamo manju (iako u Falconu su uvijek iste)
+        let min_len = std::cmp::min(len, other.coefficients.len());
+        
+        let mut new_coeffs = Vec::with_capacity(min_len);
+
+        for i in 0..min_len {
+            // Zbrajamo elemente
+            let sum = self.coefficients[i].clone() + other.coefficients[i].clone();
+            new_coeffs.push(sum);
+        }
+        
+        Polynomial { coefficients: new_coeffs }
+    }
+}
+
+impl Polynomial<Felt> {
+    pub fn norm_squared_euclidean(&self) -> u64 {
+        let mut sum: u64 = 0;
+        let q: i16 = 12289; // Falcon modulus
+        let half_q = q / 2;
+
+        for c in &self.coefficients {
+            let mut v = c.to_i16(); 
+            
+            // CENTRIRANJE: Ako je broj veći od q/2, tretraj ga kao negativan.
+            // Npr. 12288 postaje -1.
+            if v > half_q {
+                v -= q;
+            }
+
+            // Sada kvadriramo (npr. -1 * -1 = 1, što je malo i dobro!)
+            let v_sq = (v as i64) * (v as i64);
+            sum += v_sq as u64;
+        }
+        sum
     }
 }

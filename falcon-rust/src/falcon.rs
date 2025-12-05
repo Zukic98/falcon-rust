@@ -1,3 +1,5 @@
+use crate::inverse::Inverse;
+
 use bit_vec::BitVec;
 use itertools::Itertools;
 use num_complex::{Complex, Complex64};
@@ -296,7 +298,7 @@ impl<const N: usize> Eq for SecretKey<N> {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublicKey<const N: usize> {
-    h: Polynomial<Felt>,
+    pub h: Polynomial<Felt>,
 }
 
 impl<const N: usize> PublicKey<N> {
@@ -372,10 +374,11 @@ impl<const N: usize> PublicKey<N> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Signature<const N: usize> {
-    r: [u8; 40],
-    s: Vec<u8>,
+    pub r: [u8; 40],
+    pub s: Vec<u8>,
+    pub s_decoded: Option<Polynomial<Felt>>, // Novo polje
 }
 
 impl<const N: usize> Signature<N> {
@@ -434,6 +437,7 @@ impl<const N: usize> Signature<N> {
         Ok(Signature::<N> {
             r: salt,
             s: signature_vector.to_vec(),
+            s_decoded: None,
         })
     }
 }
@@ -450,10 +454,16 @@ pub fn keygen<const N: usize>(seed: [u8; 32]) -> (SecretKey<N>, PublicKey<N>) {
 /// Algorithm 10 of the specification [1, p.39].
 ///
 /// [1]: https://falcon-sign.info/falcon.pdf
-pub fn sign<const N: usize>(m: &[u8], sk: &SecretKey<N>) -> Signature<N> {
+pub fn sign<const N: usize>(m: &[u8], sk: &SecretKey<N>, forced_r: Option<[u8; 40]>) -> Signature<N> {
     let mut rng = thread_rng();
+    
+    // Promijeni inicijalizaciju 'r' ovako:
     let mut r = [0u8; 40];
-    rng.fill_bytes(&mut r);
+    if let Some(input_r) = forced_r {
+        r = input_r; // Koristi zadani salt ako postoji
+    } else {
+        rng.fill_bytes(&mut r); // Inače generiraj random
+    }
 
     let params = FalconVariant::from_n(N).parameters();
     let bound = params.sig_bound;
@@ -515,16 +525,33 @@ pub fn sign<const N: usize>(m: &[u8], sk: &SecretKey<N>) -> Signature<N> {
         );
 
         match maybe_s {
-            Some(s) => {
-                break s;
+            Some(s_bytes) => {
+                // USPJEH! Kompresija je prošla.
+                
+                // 1. Dok smo još ovdje, pretvorimo s2 u Polinom<Felt>.
+                // Moramo uzeti realni dio (re) kompleksnog broja i zaokružiti ga,
+                // baš kao što to radi kompresija iznad.
+                let s_poly_coeffs: Vec<Felt> = s2.coefficients.iter()
+                    .map(|c| c.re.round() as i16) // Pretvaramo Complex64 u i16
+                    .map(|val| Felt::new(val))    // Pretvaramo i16 u Felt
+                    .collect();
+                
+                let s_poly = Polynomial { coefficients: s_poly_coeffs };
+
+                // 2. Vraćamo potpis ODMAH (return), ne break.
+                return Signature {
+                    r: r,     // 'r' je ovdje dostupan!
+                    s: s_bytes,
+                    s_decoded: Some(s_poly),
+                };
             }
             None => {
                 continue;
             }
         };
-    };
 
-    Signature { r, s }
+
+    };
 }
 
 /// Verify a signature. Algorithm 16 in the spec [1, p.45].
